@@ -120,11 +120,16 @@ decltipo  [Table table_IN]
             if($table_IN.entries.containsKey(entry.type))
               System.err.println("Múltipla declaração do tipo "+entry.type);
           }
-          | 'typedef' 'struct' idT '{' declvariaveis[$table_IN,0,entry] '}' tipoAvancado[entry]
+          | 'typedef' 'struct' idT
           {
-            entry.type = $idT.text;
-            if($table_IN.entries.containsKey(entry.type))
+            entry.id = entry.type = $idT.text;
+            if($table_IN.entries.containsKey(entry.type)){
               System.err.println("Múltipla declaração do tipo "+entry.type);
+            }
+          }
+          '{' declvariaveis[$table_IN,0,entry] '}' tipoAvancado[entry]
+          {
+            $table_IN.entries.put($tipoAvancado.entry_OUT.id,$tipoAvancado.entry_OUT);
           }
           ;
 
@@ -134,7 +139,7 @@ funcoes  [Table table_IN]
 
 funcao  [Table table_IN]
         @after{$table_IN.removeEntries(1);}
-        : cabecfuncao[$table_IN] corpofuncao
+        : cabecfuncao[$table_IN] corpofuncao[$table_IN]
         ;
 
 cabecfuncao  [Table table_IN]
@@ -147,7 +152,7 @@ cabecfuncao  [Table table_IN]
 
                if($table_IN.entries.containsKey(entry.type)){
                  Entry entry_found = $table_IN.entries.get(entry.type);
-                 if(!entry_found.getClass().getSimpleName().equals("Typedef")){
+                 if(!(entry_found instanceof Typedef)){
                    System.out.println(entry.type+" não é um tipo");
                  }
                }else{
@@ -180,8 +185,9 @@ parametro  [Table table_IN]
            }
            ;
 
-corpofuncao : '{' declvariaveis[new Table(),0,null] instrucoes '}'
-;
+corpofuncao  [Table table_IN]
+             : '{' declvariaveis[$table_IN,1,null] instrucoes[$declvariaveis.table_OUT] '}'
+             ;
 
 declvariaveis  [Table table_IN, int level,Entry struct]
                returns [Table table_OUT]
@@ -194,7 +200,7 @@ declvariavel  [Table table_IN, int level, Entry struct]
               {
                 if($table_IN.entries.containsKey($idT.text)){
                   Entry entry_found = $table_IN.entries.get($idT.text);
-                  if(!entry_found.getClass().getSimpleName().equals("Typedef")){
+                  if(!(entry_found instanceof Typedef)){
                     System.out.println($idT.text+" não é um tipo");
                   }
                 }else{
@@ -205,6 +211,7 @@ declvariavel  [Table table_IN, int level, Entry struct]
               ;
 
 listadcls  [Table table_IN, int level, String type,Entry struct]
+           @init{Typedef typedef = (Typedef) struct;}
            : dcl[$table_IN,$level,$type,$struct] (',' dcl[$table_IN,$level,$type,$struct])*
            | '(' idV
            {
@@ -212,12 +219,26 @@ listadcls  [Table table_IN, int level, String type,Entry struct]
              entry.id = $idV.text;
              entry.level = $level;
              entry.type = $type;
-             if($struct == null){
-               $table_IN.entries.put(entry.id,entry);
-             }else{
-               ((Typedef) struct).fields.put(entry.id,entry);
-             }
 
+             if($struct == null){
+               if($table_IN.entries.containsKey(entry.id)){
+                 System.err.println("Múltipla declaração do termo "+entry.id);
+               }else{
+                 $table_IN.entries.put(entry.id,entry);
+                 }
+             }else{
+               if($table_IN.entries.containsKey(entry.id)){
+                 if($table_IN.entries.get(entry.id) instanceof Typedef){
+                   System.err.println(entry.id+" é um tipo e não pode ser definido como variavel");
+                 }
+               }else{
+                 if(typedef.fields.containsKey(entry.id)){
+                   System.err.println("Múltipla declaração do termo "+entry.id+" na estrutura "+typedef.type);
+                 }else{
+                   typedef.fields.put(entry.id,entry);
+                 }
+               }
+             }
            }
            (',' idV
            {
@@ -226,25 +247,50 @@ listadcls  [Table table_IN, int level, String type,Entry struct]
              entryRec.level = $level;
              entryRec.type = $type;
              if($struct == null){
-               $table_IN.entries.put(entryRec.id,entryRec);
+               if($table_IN.entries.containsKey(entryRec.id)){
+                 System.err.println("Múltipla declaração do termo "+entryRec.id);
+               }else{
+                 $table_IN.entries.put(entryRec.id,entryRec);
+                 }
              }else{
-               ((Typedef) struct).fields.put(entryRec.id,entryRec);
+               if(typedef.fields.containsKey(entryRec.id)){
+                 System.err.println("Múltipla declaração do termo "+entryRec.id+" na estrutura "+typedef.type);
+               }else{
+                 typedef.fields.put(entryRec.id,entryRec);
+               }
              }
            }
            )* ')' '=' exp
            ;
 
 dcl  [Table table_IN, int level, String type,Entry struct]
+     @init{Typedef typedef = (Typedef) struct;}
      : idV
      {
        Entry entry = new Variable();
        entry.id = $idV.text;
        entry.level = $level;
        entry.type = $type;
+
+
        if($struct == null){
-         $table_IN.entries.put(entry.id,entry);
+         if($table_IN.entries.containsKey(entry.id)){
+           System.err.println("Múltipla declaração do termo "+entry.id);
+         }else{
+           $table_IN.entries.put(entry.id,entry);
+           }
        }else{
-         ((Typedef) struct).fields.put(entry.id,entry);
+         if($table_IN.entries.containsKey(entry.id)){
+           if($table_IN.entries.get(entry.id) instanceof Typedef){
+             System.err.println(entry.id+" é um tipo e não pode ser definido como variavel");
+           }
+         }else{
+           if(typedef.fields.containsKey(entry.id)){
+             System.err.println("Múltipla declaração do termo "+entry.id+" na estrutura "+typedef.type);
+           }else{
+             typedef.fields.put(entry.id,entry);
+           }
+         }
        }
      }
      ('=' exp)?
@@ -255,52 +301,101 @@ dcl  [Table table_IN, int level, String type,Entry struct]
        entry.level = $level;
        entry.type = $type;
        if($struct == null){
-         $table_IN.entries.put(entry.id,entry);
+         if($table_IN.entries.containsKey(entry.id)){
+           System.err.println("Múltipla declaração do termo "+entry.id);
+         }else{
+           $table_IN.entries.put(entry.id,entry);
+           }
        }else{
-         ((Typedef) struct).fields.put(entry.id,entry);
+         if($table_IN.entries.containsKey(entry.id)){
+           if($table_IN.entries.get(entry.id) instanceof Typedef){
+             System.err.println(entry.id+" é um tipo e não pode ser definido como variavel");
+           }
+         }else{
+           if(typedef.fields.containsKey(entry.id)){
+             System.err.println("Múltipla declaração do termo "+entry.id+" na estrutura "+typedef.type);
+           }else{
+             typedef.fields.put(entry.id,entry);
+           }
+         }
        }
      }
      ;
 
-tipoAvancado  [Entry entry]
-              : ('*')? {$entry.pointer = true;}
-              idT {$entry.id = $idT.text;}
+tipoAvancado  [Entry entry_IN]
+              returns [Entry entry_OUT]
+              @init{
+                $entry_OUT = new Typedef();
+                $entry_OUT.type = $entry_IN.id;
+              }
+              : ('*')? {$entry_OUT.pointer = true;}
+              idT {$entry_OUT.id = $idT.text;}
               ('[' conste ']'
               {
-                ((Typedef) entry).size = $conste.value;
+                ((Typedef) $entry_OUT).size = $conste.value;
               }
               )?
               ;
 
 /* Instruções --------------------------------------------------------------- */
 
-instrucoes : (instrucao ';')+ ;
+instrucoes  [Table table_IN]
+            : (instrucao[$table_IN] ';')+
+            ;
 
-instrucao  : atrib
-           | invocFunc
-           | controlo
+instrucao  [Table table_IN]
+           : atrib[$table_IN]
+           | invocFunc[$table_IN]
+           | controlo[$table_IN]
            | leitura
            | escrita
            ;
 
-atrib      : idV '=' exp;
+atrib  [Table table_IN]
+       : idV
+       {
+         if($table_IN.entries.containsKey($idV.text)){
+           Entry variavel = $table_IN.entries.get($idV.text);
+           if(!(variavel instanceof Variable)){
+             System.err.println($idV.text+" não é uma variavel");
+           }
+         }
+         else{
+           System.err.println($idV.text+" desconhecido");
+         }
+       }
+       '=' exp;
 
-invocFunc  : idF '(' exps? ')';
+invocFunc  [Table table_IN]
+           : idF
+           {
+             if($table_IN.entries.containsKey($idF.text)){
+               Entry variavel = $table_IN.entries.get($idF.text);
+               if(!(variavel instanceof Function)){
+                 System.err.println($idF.text+" não é uma função");
+               }
+             }
+             else{
+               System.err.println($idF.text+" desconhecido");
+             }
+           }
+           '(' exps? ')'
+           ;
 
 exps       : exp ( ',' exp)*;
 
 exp        : termo
-| exp OPAD termo?
-;
+            | exp OPAD termo?
+            ;
 
 termo      : fator
-| termo OPMUL fator;
+            | termo OPMUL fator;
 
 fator      : conste
-| invocFunc
-| idV
-| '(' exp ')'
-| idV '[' conste ']'
+          | invocFunc[null]
+          | idV
+          | '(' exp ')'
+          | idV '[' conste ']'
 ;
 
 leitura    : 'read' '(' vars  ')' ;
@@ -309,21 +404,25 @@ vars       : idV (',' idV)* ;
 
 escrita    : 'write' '(' exps ')' ;
 
-controlo   : cond
-| ciclo
-| paragem
-;
+controlo  [Table table_IN]
+          : cond[$table_IN]
+          | ciclo[$table_IN]
+          | paragem[$table_IN]
+          ;
 
-cond       : 'if' '(' exp ')' '{' instrucoes '}' (('elsif' '(' exp ')' '{' instrucoes '}')* 'else' '{' instrucoes '}')? ;
+cond  [Table table_IN]
+      : 'if' '(' exp ')' '{' instrucoes[$table_IN] '}' (('elsif' '(' exp ')' '{' instrucoes[$table_IN] '}')* 'else' '{' instrucoes[$table_IN] '}')? ;
 
-ciclo      : 'while' '(' exp ')' '{' instrucoes '}'
-| 'for' '(' atrib?  ';' exp ';' exp? ')' '{' instrucoes '}'
-| 'do' '{' instrucoes '}' 'while' '(' exp ')'
-;
+ciclo  [Table table_IN]
+       : 'while' '(' exp ')' '{' instrucoes[$table_IN] '}'
+       | 'for' '(' atrib[$table_IN]?  ';' exp ';' exp? ')' '{' instrucoes[$table_IN] '}'
+       | 'do' '{' instrucoes[$table_IN] '}' 'while' '(' exp ')'
+       ;
 
-paragem    : 'break'
-| 'return' exp?
-;
+paragem  [Table table_IN]
+         : 'break'
+         | 'return' exp?
+         ;
 
 /* Identificadores ----------------------------------------------m------------ */
 
