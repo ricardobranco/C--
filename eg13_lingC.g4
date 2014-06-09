@@ -7,6 +7,7 @@ grammar eg13_lingC;
 
 @header{
   import java.util.*;
+  import java.lang.*;
 }
 
 @members{
@@ -36,6 +37,7 @@ grammar eg13_lingC;
 
   class Table extends Entry{
     HashMap<String,Entry> entries = new HashMap<>();
+    int nextID = 0;
 
     void removeEntries(int level){
       Iterator<String> iterator = entries.keySet().iterator();
@@ -94,10 +96,12 @@ declconsts  [Table table_IN]
             ;
 
 declconst  [Table table_IN]
-           : 'define' idC exp
+           : 'define' idC exp[$table_IN]
            {
              Entry entry = new Constant();
              entry.id = $idC.text;
+             entry.type = $exp.type_OUT;
+             ((Constant) entry).value = $exp.value_OUT;
              if($table_IN.entries.containsKey(entry.id))
                System.err.println("Múltipla declaração de "+entry.id);
              else
@@ -114,7 +118,7 @@ decltipos  [Table table_IN]
 decltipo  [Table table_IN]
           @init{Entry entry = new Typedef();}
           @after{$table_IN.entries.put(entry.id,entry);}
-          : 'typedef' idT tipoAvancado[entry]
+          : 'typedef' idT tipoAvancado[$table_IN,entry]
           {
             entry.type = $idT.text;
             if($table_IN.entries.containsKey(entry.type))
@@ -127,7 +131,7 @@ decltipo  [Table table_IN]
               System.err.println("Múltipla declaração do tipo "+entry.type);
             }
           }
-          '{' declvariaveis[$table_IN,0,entry] '}' tipoAvancado[entry]
+          '{' declvariaveis[$table_IN,0,entry] '}' tipoAvancado[$table_IN,entry]
           {
             $table_IN.entries.put($tipoAvancado.entry_OUT.id,$tipoAvancado.entry_OUT);
           }
@@ -260,7 +264,7 @@ listadcls  [Table table_IN, int level, String type,Entry struct]
                }
              }
            }
-           )* ')' '=' exp
+           )* ')' '=' exp[$table_IN]
            ;
 
 dcl  [Table table_IN, int level, String type,Entry struct]
@@ -293,13 +297,26 @@ dcl  [Table table_IN, int level, String type,Entry struct]
          }
        }
      }
-     ('=' exp)?
-     | idV '[' conste ']'
+     ('=' exp[$table_IN])?
+     | idV '[' conste[$table_IN] ']'
      {
+       Entry array = new Typedef();
+       array.id = "*idArray"+$table_IN.nextID;
+       $table_IN.nextID++;
+       array.type = $type;
+
+       if($conste.type_OUT.equals("int")){
+         ((Typedef) array).size = Integer.parseInt($conste.value_OUT);
+         $table_IN.entries.put(array.id,array);
+       }else{
+         System.err.println($conste.value_OUT+" não é um valor númerico");
+       }
+
+
        Entry entry = new Variable();
        entry.id = $idV.text;
        entry.level = $level;
-       entry.type = $type;
+       entry.type = array.id;
        if($struct == null){
          if($table_IN.entries.containsKey(entry.id)){
            System.err.println("Múltipla declaração do termo "+entry.id);
@@ -322,7 +339,7 @@ dcl  [Table table_IN, int level, String type,Entry struct]
      }
      ;
 
-tipoAvancado  [Entry entry_IN]
+tipoAvancado  [Table table_IN,Entry entry_IN]
               returns [Entry entry_OUT]
               @init{
                 $entry_OUT = new Typedef();
@@ -330,9 +347,9 @@ tipoAvancado  [Entry entry_IN]
               }
               : ('*')? {$entry_OUT.pointer = true;}
               idT {$entry_OUT.id = $idT.text;}
-              ('[' conste ']'
+              ('[' conste[table_IN] ']'
               {
-                ((Typedef) $entry_OUT).size = $conste.value;
+                ((Typedef) $entry_OUT).size = Integer.parseInt($conste.value_OUT);
               }
               )?
               ;
@@ -347,8 +364,8 @@ instrucao  [Table table_IN]
            : atrib[$table_IN]
            | invocFunc[$table_IN]
            | controlo[$table_IN]
-           | leitura
-           | escrita
+           | leitura[$table_IN]
+           | escrita[$table_IN]
            ;
 
 atrib  [Table table_IN]
@@ -364,7 +381,7 @@ atrib  [Table table_IN]
            System.err.println($idV.text+" desconhecido");
          }
        }
-       '=' exp;
+       '=' exp[$table_IN];
 
 invocFunc  [Table table_IN]
            : idF
@@ -379,30 +396,73 @@ invocFunc  [Table table_IN]
                System.err.println($idF.text+" desconhecido");
              }
            }
-           '(' exps? ')'
+           '(' exps[$table_IN]? ')'
            ;
 
-exps       : exp ( ',' exp)*;
+exps  [Table table_IN]
+      : exp[$table_IN] ( ',' exp[$table_IN])*;
 
-exp        : termo
-            | exp OPAD termo?
-            ;
+exp  [Table table_IN]
+     returns [String value_OUT, String type_OUT]
+     : t1 = termo[$table_IN] (OPAD t2 = termo[$table_IN]?)*
+     {$value_OUT = $t1.value_OUT; $type_OUT = $t1.type_OUT;}
+     ;
 
-termo      : fator
-            | termo OPMUL fator;
+termo [Table table_IN]
+      returns [String value_OUT, String type_OUT]
+      : f1 = fator[$table_IN] (OPMUL f2 = fator[$table_IN])*
+      {$value_OUT = $f1.value_OUT; $type_OUT = $f1.type_OUT;}
+      ;
 
-fator      : conste
-          | invocFunc[null]
-          | idV
-          | '(' exp ')'
-          | idV '[' conste ']'
-;
+fator [Table table_IN]
+      returns [String value_OUT, String type_OUT]
+      : conste[$table_IN]
+      {$value_OUT = $conste.value_OUT; $type_OUT = $conste.type_OUT;}
+      | invocFunc[null]
+      | '(' exp[$table_IN] ')'
+      | idV '[' conste[$table_IN] ']'
+      {
+        if($table_IN.entries.containsKey($idV.text)){
+          Entry entry = $table_IN.entries.get($idV.text);
+          if(!(entry instanceof Variable)){
+            System.err.println($idV.text+" não é uma variavel");
+          }
+        }else{
+          System.err.println($idV.text+" desconhecido");
+        }
+      }
+      ;
 
-leitura    : 'read' '(' vars  ')' ;
+leitura  [Table table_IN]
+         : 'read' '(' vars[$table_IN]  ')' ;
 
-vars       : idV (',' idV)* ;
+vars  [Table table_IN]
+      : idV
+      {
+        if($table_IN.entries.containsKey($idV.text)){
+          Entry entry = $table_IN.entries.get($idV.text);
+          if(!(entry instanceof Variable)){
+            System.err.println($idV.text+" não é uma variavel");
+          }
+        }else{
+          System.err.println($idV.text+" desconhecido");
+        }
+      }
+      (',' idV
+      {
+        if($table_IN.entries.containsKey($idV.text)){
+          Entry entry = $table_IN.entries.get($idV.text);
+          if(!(entry instanceof Variable)){
+            System.err.println($idV.text+" não é uma variavel");
+          }
+        }else{
+          System.err.println($idV.text+" desconhecido");
+        }
+      }
+      )* ;
 
-escrita    : 'write' '(' exps ')' ;
+escrita  [Table table_IN]
+         : 'write' '(' exps[$table_IN] ')' ;
 
 controlo  [Table table_IN]
           : cond[$table_IN]
@@ -411,17 +471,17 @@ controlo  [Table table_IN]
           ;
 
 cond  [Table table_IN]
-      : 'if' '(' exp ')' '{' instrucoes[$table_IN] '}' (('elsif' '(' exp ')' '{' instrucoes[$table_IN] '}')* 'else' '{' instrucoes[$table_IN] '}')? ;
+      : 'if' '(' exp[$table_IN] ')' '{' instrucoes[$table_IN] '}' (('elsif' '(' exp[$table_IN] ')' '{' instrucoes[$table_IN] '}')* 'else' '{' instrucoes[$table_IN] '}')? ;
 
 ciclo  [Table table_IN]
-       : 'while' '(' exp ')' '{' instrucoes[$table_IN] '}'
-       | 'for' '(' atrib[$table_IN]?  ';' exp ';' exp? ')' '{' instrucoes[$table_IN] '}'
-       | 'do' '{' instrucoes[$table_IN] '}' 'while' '(' exp ')'
+       : 'while' '(' exp[$table_IN] ')' '{' instrucoes[$table_IN] '}'
+       | 'for' '(' atrib[$table_IN]?  ';' exp[$table_IN] ';' exp[$table_IN]? ')' '{' instrucoes[$table_IN] '}'
+       | 'do' '{' instrucoes[$table_IN] '}' 'while' '(' exp[$table_IN] ')'
        ;
 
 paragem  [Table table_IN]
          : 'break'
-         | 'return' exp?
+         | 'return' exp[$table_IN]?
          ;
 
 /* Identificadores ----------------------------------------------m------------ */
@@ -432,10 +492,29 @@ idP   : ID ; // ID ParÃ¢metro
 idV   : ID ; // ID Variável
 idC   : ID ; // ID Constante
 
-conste  returns[int value]
-        : idC
-        | INT {$value = $INT.int;}
-        | STRING
+conste  [Table table_IN]
+        returns [String value_OUT, String type_OUT]
+        : ID {
+
+
+          if($table_IN.entries.containsKey($ID.text)){
+            Entry entry = $table_IN.entries.get($ID.text);
+            if(entry instanceof Constant){
+              $value_OUT = ((Constant) entry).value;
+              $type_OUT = entry.type;
+            }else{
+              if(entry instanceof Variable){
+
+              }else{
+                System.err.println($ID.text+" não é uma constante ou variavel");
+              }
+            }
+          }else{
+            System.err.println($ID.text+" não definido");
+          }
+        }
+        | INT {$value_OUT = $INT.text; $type_OUT = "int";}
+        | STRING {$value_OUT = $STRING.text; $type_OUT = "char";}
         ;
 
 /*--------------- Lexer ------------------------------------------------------*/
