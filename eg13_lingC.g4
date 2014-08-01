@@ -35,7 +35,7 @@ grammar eg13_lingC;
     String name;
   }
 
-  class Table extends Entry{
+  class Table{
     HashMap<String,Entry> entries = new HashMap<>();
     int nextID = 0;
 

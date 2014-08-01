@@ -7,7 +7,7 @@ typedef struct struct_myStruct {
 	int dia;
 }MyStruct;
 
-
+MyStruct s;
 int saco[a] ;
 
 int soma ( int valor ) {
@@ -16,6 +16,7 @@ int soma ( int valor ) {
 
 int soma2 ( int valor ) {
 	int x ;
+
 	x = 2 + saco[2] + valor ;
 	return x ;
 }
